@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#5b8def" />
+  <meta name="description" content="A simple Connections-style matching game for kids ages 5-9. Find the three groups!" />
+  <title>Kid Connections 🧩</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1 class="title">🧩 Kid Connections</h1>
+      <p class="tagline">Find the <strong>3 groups</strong> that go together!</p>
+    </header>
+
+    <!-- Solved groups stack up here -->
+    <section id="solved" class="solved" aria-live="polite"></section>
+
+    <!-- The 3x3 grid of tiles -->
+    <main id="grid" class="grid" aria-label="Puzzle tiles"></main>
+
+    <!-- Status / hearts -->
+    <div class="statusbar">
+      <div id="hearts" class="hearts" aria-label="Tries left"></div>
+      <div id="message" class="message" aria-live="polite"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button id="check" class="btn btn-primary" disabled>Check ✅</button>
+      <button id="shuffle" class="btn btn-secondary">Shuffle 🔀</button>
+      <button id="hint" class="btn btn-secondary">Hint 💡</button>
+      <button id="newgame" class="btn btn-secondary">New Puzzle 🔄</button>
+    </div>
+  </div>
+
+  <!-- Win / end overlay -->
+  <div id="overlay" class="overlay hidden">
+    <div class="overlay-card">
+      <div id="overlay-emoji" class="overlay-emoji">🎉</div>
+      <h2 id="overlay-title" class="overlay-title">You did it!</h2>
+      <p id="overlay-text" class="overlay-text"></p>
+      <button id="overlay-btn" class="btn btn-primary big">Play Again ▶️</button>
+    </div>
+  </div>
+
+  <div id="confetti" class="confetti" aria-hidden="true"></div>
+
+  <script src="puzzles.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
