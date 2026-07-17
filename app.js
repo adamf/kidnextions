@@ -227,6 +227,16 @@
       btn.addEventListener("click", () => onTileClick(tile.text));
       gridEl.appendChild(btn);
     });
+    measureRowHeight();
+  }
+
+  // Record the height of a single tile so solved-group bars can match a tile
+  // row exactly. Tiles are square, so this depends only on width and columns.
+  function measureRowHeight() {
+    const tile = gridEl.querySelector(".tile");
+    if (!tile) return; // nothing to measure (keep the last value)
+    const h = tile.getBoundingClientRect().height;
+    if (h > 0) document.documentElement.style.setProperty("--row-h", h + "px");
   }
 
   function renderSolvedGroup(group, slot) {
@@ -305,9 +315,6 @@
     solvedEl.innerHTML = "";
     overlay.classList.add("hidden");
     confettiEl.innerHTML = "";
-    // Clear any leftover inline styles from an interrupted animation.
-    gridEl.style.transition = "";
-    gridEl.style.height = "";
 
     syncSettingsUI();
     setMessage("Tap " + numberWord(size) + " tiles that belong together!");
@@ -371,18 +378,17 @@
     }, 400);
   }
 
-  // Smoothly remove a solved group: the solved tiles leave, and the remaining
-  // tiles + the grid's height animate to their new layout (FLIP technique) so
-  // rows never snap abruptly.
+  // Smoothly remove a solved group: the group turns into a solved bar (which is
+  // the same height as the tile row it replaces, so nothing below shifts), and
+  // the remaining tiles glide to their new spots (FLIP technique).
   function transitionRemoveGroup(groupIndex, group) {
     const oldBtns = Array.from(gridEl.querySelectorAll(".tile"));
 
-    // FIRST: record where the remaining tiles are right now, and the grid size.
+    // FIRST: record where the remaining tiles are right now.
     const firstRects = {};
     oldBtns.forEach(function (b) {
       firstRects[b.textContent] = b.getBoundingClientRect();
     });
-    const gridFirstHeight = gridEl.getBoundingClientRect().height;
 
     // Move the group to the solved area and drop its tiles from the grid.
     solvedCount += 1;
@@ -407,13 +413,8 @@
       return;
     }
 
-    // LAST: measure the new layout.
+    // LAST + INVERT: offset each remaining tile back to where it just was.
     const newBtns = Array.from(gridEl.querySelectorAll(".tile"));
-    const gridLastHeight = gridEl.getBoundingClientRect().height;
-
-    // INVERT: pin the grid to its old height and offset each remaining tile
-    // back to where it just was, with no transition yet.
-    gridEl.style.height = gridFirstHeight + "px";
     newBtns.forEach(function (b) {
       const first = firstRects[b.textContent];
       if (!first) return;
@@ -424,10 +425,8 @@
       b.style.transform = "translate(" + dx + "px, " + dy + "px)";
     });
 
-    // PLAY: on the next frame, release everything to its final position.
+    // PLAY: on the next frame, release each tile to its final position.
     requestAnimationFrame(function () {
-      gridEl.style.transition = "height 0.4s ease";
-      gridEl.style.height = gridLastHeight + "px";
       newBtns.forEach(function (b) {
         b.style.transition = "transform 0.4s ease";
         b.style.transform = "";
@@ -436,8 +435,6 @@
 
     // Clean up inline styles once the glide is done.
     setTimeout(function () {
-      gridEl.style.transition = "";
-      gridEl.style.height = "";
       newBtns.forEach(function (b) {
         b.style.transition = "";
         b.style.transform = "";
@@ -588,6 +585,9 @@
     Sound.toggle();
     syncSettingsUI();
   });
+
+  // Keep solved-bar height in sync with tile size when the viewport changes.
+  window.addEventListener("resize", measureRowHeight);
 
   gridBtns.forEach((b) =>
     b.addEventListener("click", () => {

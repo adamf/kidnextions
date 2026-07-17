@@ -122,6 +122,12 @@ html, body {
   color: #3a2e12;
   box-shadow: var(--shadow);
   animation: pop 0.35s ease;
+  /* Match a tile row's height so a solved group replaces the row it came
+     from, keeping the board's total height steady as groups are solved. */
+  min-height: var(--row-h, 56px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .solved-group.g1 { background: var(--g1); }
 .solved-group.g2 { background: var(--g2); }
@@ -137,9 +143,9 @@ html, body {
   gap: var(--gap);
   margin-bottom: 12px;
   /* Keep tiles pinned to the top so an animated height change never
-     stretches them, and don't overflow during the reflow glide. */
+     stretches them. (No overflow clipping here — it would cut off the
+     tiles' drop shadow on the bottom row.) */
   align-content: start;
-  overflow: hidden;
 }
 /* Smaller words fit more comfortably on the tighter 4x4 board. */
 .grid[data-cols="4"] .tile {
