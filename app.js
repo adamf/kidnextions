@@ -1,15 +1,65 @@
 /* ---------------------------------------------------------------------------
    Kid Connections — game logic
-   A 3x3, three-group version of Connections for ages 5-9.
+   A Connections-style matching game for ages 5-9.
+
+   Modes:
+     - Grid size 3x3 (3 groups of 3) or 4x4 (4 groups of 4).
+     - Difficulty (Easy / Medium / Hard) controls tries and whether hints show.
+     - Sound effects (toggleable) via the Web Audio API — no audio files needed.
+
    Depends on GROUPS from puzzles.js.
 --------------------------------------------------------------------------- */
 
 (function () {
   "use strict";
 
-  const GROUP_SIZE = 3;      // tiles per group
-  const NUM_GROUPS = 3;      // groups per puzzle (fills the 3x3 grid)
-  const START_HEARTS = 4;    // tries before a gentle "good try"
+  // ---- Settings & difficulty ----
+  const DIFFICULTY = {
+    easy: { hearts: 5, hints: true, label: "Easy" },
+    medium: { hearts: 4, hints: true, label: "Medium" },
+    hard: { hearts: 3, hints: false, label: "Hard" },
+  };
+
+  const STORE = {
+    grid: "kc-grid",
+    diff: "kc-diff",
+    muted: "kc-muted",
+  };
+
+  function loadSetting(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? fallback : v;
+    } catch (e) {
+      return fallback;
+    }
+  }
+  function saveSetting(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      /* ignore (private mode, etc.) */
+    }
+  }
+
+  let gridSize = parseInt(loadSetting(STORE.grid, "3"), 10);
+  if (gridSize !== 3 && gridSize !== 4) gridSize = 3;
+  let difficulty = loadSetting(STORE.diff, "medium");
+  if (!DIFFICULTY[difficulty]) difficulty = "medium";
+
+  // groupSize === numGroups === gridSize (an NxN board of N groups of N).
+  function groupSize() {
+    return gridSize;
+  }
+  function numGroups() {
+    return gridSize;
+  }
+  function startHearts() {
+    return DIFFICULTY[difficulty].hearts;
+  }
+  function hintsAllowed() {
+    return DIFFICULTY[difficulty].hints;
+  }
 
   // ---- DOM ----
   const gridEl = document.getElementById("grid");
@@ -26,14 +76,98 @@
   const overlayText = document.getElementById("overlay-text");
   const overlayBtn = document.getElementById("overlay-btn");
   const confettiEl = document.getElementById("confetti");
+  const soundToggle = document.getElementById("sound-toggle");
+  const gridBtns = document.querySelectorAll("[data-grid]");
+  const diffBtns = document.querySelectorAll("[data-diff]");
 
   // ---- State ----
-  let puzzleGroups = [];   // the 3 chosen group objects for this puzzle
-  let tiles = [];          // { text, groupIndex } for tiles still on the grid
-  let selected = [];       // tile texts currently selected
-  let solvedCount = 0;     // how many groups solved
-  let hearts = START_HEARTS;
+  let puzzleGroups = []; // chosen groups (with the sampled tiles actually in play)
+  let tiles = []; // { text, groupIndex } for tiles still on the grid
+  let selected = []; // tile texts currently selected
+  let solvedCount = 0; // how many groups solved
+  let hearts = startHearts();
   let hintActive = false;
+  let busy = false; // true while a solve/wrong animation is running
+
+  // ---------------------------------------------------------------------------
+  // Sound effects (Web Audio — synthesized, no files, works offline)
+  // ---------------------------------------------------------------------------
+  const Sound = (function () {
+    let ctx = null;
+    let muted = loadSetting(STORE.muted, "0") === "1";
+
+    function ensure() {
+      if (!ctx) {
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) ctx = new AC();
+        } catch (e) {
+          ctx = null;
+        }
+      }
+      if (ctx && ctx.state === "suspended") ctx.resume();
+      return ctx;
+    }
+
+    // Play a single note at `start` seconds from now.
+    function note(freq, start, dur, type, vol) {
+      const c = ensure();
+      if (!c || muted) return;
+      const t = c.currentTime + start;
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.type = type || "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(vol || 0.2, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain);
+      gain.connect(c.destination);
+      osc.start(t);
+      osc.stop(t + dur + 0.03);
+    }
+
+    return {
+      isMuted: function () {
+        return muted;
+      },
+      toggle: function () {
+        muted = !muted;
+        saveSetting(STORE.muted, muted ? "1" : "0");
+        if (!muted) this.tap(); // little confirmation blip
+        return muted;
+      },
+      // Prime the audio context on a user gesture (autoplay policies).
+      unlock: function () {
+        ensure();
+      },
+      tap: function () {
+        note(520, 0, 0.09, "triangle", 0.1);
+      },
+      deselect: function () {
+        note(380, 0, 0.08, "triangle", 0.08);
+      },
+      hint: function () {
+        note(988, 0, 0.12, "sine", 0.14);
+        note(1319, 0.09, 0.14, "sine", 0.12);
+      },
+      correct: function () {
+        note(523, 0, 0.13, "sine", 0.18); // C5
+        note(659, 0.1, 0.13, "sine", 0.18); // E5
+        note(784, 0.2, 0.18, "sine", 0.2); // G5
+      },
+      wrong: function () {
+        note(196, 0, 0.18, "sawtooth", 0.13);
+        note(146, 0.14, 0.22, "sawtooth", 0.13);
+      },
+      win: function () {
+        const seq = [523, 659, 784, 1047, 784, 1047]; // C E G C - G C
+        seq.forEach(function (f, i) {
+          note(f, i * 0.12, 0.18, "triangle", 0.2);
+        });
+      },
+    };
+  })();
 
   // ---------------------------------------------------------------------------
   // Utilities
@@ -47,9 +181,14 @@
     return a;
   }
 
-  // Pick NUM_GROUPS groups that do not share any tile word (case-insensitive),
-  // so a puzzle is never ambiguous by an exact-word overlap.
-  function pickGroups() {
+  const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six"];
+  function numberWord(n) {
+    return NUMBER_WORDS[n] || String(n);
+  }
+
+  // Pick `count` groups that do not share any tile word (case-insensitive), so a
+  // puzzle is never ambiguous by an exact-word overlap.
+  function pickGroups(count) {
     const pool = shuffle(GROUPS);
     const chosen = [];
     const usedWords = new Set();
@@ -60,7 +199,7 @@
       if (clashes) continue;
       chosen.push(group);
       words.forEach((w) => usedWords.add(w));
-      if (chosen.length === NUM_GROUPS) break;
+      if (chosen.length === count) break;
     }
     return chosen;
   }
@@ -70,7 +209,8 @@
   // ---------------------------------------------------------------------------
   function renderHearts() {
     let s = "";
-    for (let i = 0; i < START_HEARTS; i++) {
+    const max = startHearts();
+    for (let i = 0; i < max; i++) {
       s += i < hearts ? "❤️" : "🤍";
     }
     heartsEl.textContent = s;
@@ -95,7 +235,9 @@
     div.innerHTML =
       '<div class="solved-theme">' +
       (group.emoji ? '<span class="emoji">' + group.emoji + "</span>" : "") +
-      "<span>" + escapeHtml(group.theme) + "</span></div>" +
+      "<span>" +
+      escapeHtml(group.theme) +
+      "</span></div>" +
       '<div class="solved-tiles">' +
       group.tiles.map(escapeHtml).join(" · ") +
       "</div>";
@@ -113,11 +255,41 @@
     messageEl.className = "message" + (kind ? " " + kind : "");
   }
 
+  function syncSettingsUI() {
+    gridBtns.forEach((b) =>
+      b.classList.toggle("active", parseInt(b.dataset.grid, 10) === gridSize)
+    );
+    diffBtns.forEach((b) => b.classList.toggle("active", b.dataset.diff === difficulty));
+    soundToggle.textContent = Sound.isMuted() ? "🔇" : "🔊";
+    soundToggle.setAttribute(
+      "aria-label",
+      Sound.isMuted() ? "Turn sound on" : "Turn sound off"
+    );
+    // Hints are hidden on Hard.
+    hintBtn.style.display = hintsAllowed() ? "" : "none";
+    // Grid columns + font scaling class.
+    gridEl.style.setProperty("--cols", gridSize);
+    gridEl.dataset.cols = gridSize;
+  }
+
   // ---------------------------------------------------------------------------
   // Game flow
   // ---------------------------------------------------------------------------
   function newGame() {
-    puzzleGroups = pickGroups();
+    const n = numGroups();
+    const size = groupSize();
+    const chosen = pickGroups(n);
+
+    // Sample `size` tiles from each chosen group; those are the tiles in play,
+    // and also what the solved reveal will show.
+    puzzleGroups = chosen.map(function (group) {
+      return {
+        theme: group.theme,
+        emoji: group.emoji,
+        tiles: shuffle(group.tiles).slice(0, size),
+      };
+    });
+
     tiles = [];
     puzzleGroups.forEach((group, gi) => {
       group.tiles.forEach((text) => tiles.push({ text: text, groupIndex: gi }));
@@ -126,25 +298,35 @@
 
     selected = [];
     solvedCount = 0;
-    hearts = START_HEARTS;
+    hearts = startHearts();
     hintActive = false;
+    busy = false;
 
     solvedEl.innerHTML = "";
     overlay.classList.add("hidden");
     confettiEl.innerHTML = "";
-    setMessage("Tap three tiles that belong together!");
+    // Clear any leftover inline styles from an interrupted animation.
+    gridEl.style.transition = "";
+    gridEl.style.height = "";
+
+    syncSettingsUI();
+    setMessage("Tap " + numberWord(size) + " tiles that belong together!");
     renderHearts();
     renderGrid();
     updateCheckBtn();
   }
 
   function onTileClick(text) {
+    if (busy) return;
+    Sound.unlock();
     const idx = selected.indexOf(text);
     if (idx >= 0) {
       selected.splice(idx, 1); // deselect
+      Sound.deselect();
     } else {
-      if (selected.length >= GROUP_SIZE) return; // already have three
+      if (selected.length >= groupSize()) return; // already have a full group
       selected.push(text);
+      Sound.tap();
     }
     clearHint();
     renderGrid();
@@ -153,13 +335,12 @@
   }
 
   function updateCheckBtn() {
-    checkBtn.disabled = selected.length !== GROUP_SIZE;
+    checkBtn.disabled = busy || selected.length !== groupSize();
   }
 
   function checkSelection() {
-    if (selected.length !== GROUP_SIZE) return;
+    if (busy || selected.length !== groupSize()) return;
 
-    // Which group does the first selected tile belong to?
     const first = tiles.find((t) => t.text === selected[0]);
     const targetGroup = first.groupIndex;
     const allMatch = selected.every((text) => {
@@ -178,15 +359,15 @@
     window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function handleCorrect(groupIndex) {
-    // Celebrate the correct tiles, then glide the rest into place.
+    busy = true;
+    Sound.correct();
     animateTiles(selected, "correct");
     const group = puzzleGroups[groupIndex];
-    const solvedTexts = selected.slice();
     selected = [];
     checkBtn.disabled = true;
 
     setTimeout(function () {
-      transitionRemoveGroup(groupIndex, group, solvedTexts);
+      transitionRemoveGroup(groupIndex, group);
     }, 400);
   }
 
@@ -212,8 +393,9 @@
     renderGrid();
 
     function finish() {
+      busy = false;
       updateCheckBtn();
-      if (solvedCount === NUM_GROUPS) {
+      if (solvedCount === numGroups()) {
         win();
       } else {
         setMessage("Yay! You found one! 🎈", "good");
@@ -265,11 +447,12 @@
   }
 
   function handleWrong() {
+    busy = true;
+    Sound.wrong();
     animateTiles(selected, "wrong");
     hearts -= 1;
     renderHearts();
 
-    // Count how many are correct for a friendly hint.
     const first = tiles.find((t) => t.text === selected[0]);
     const targetGroup = first.groupIndex;
     const rightCount = selected.filter((text) => {
@@ -279,12 +462,13 @@
 
     setTimeout(() => {
       selected = [];
+      busy = false;
       renderGrid();
       updateCheckBtn();
       if (hearts <= 0) {
         gameOver();
-      } else if (rightCount === GROUP_SIZE - 1) {
-        setMessage("So close! Two go together. 🤏", "bad");
+      } else if (rightCount === groupSize() - 1) {
+        setMessage("So close! One doesn't fit. 🤏", "bad");
       } else {
         setMessage("Not quite — try again! 💪", "bad");
       }
@@ -304,9 +488,9 @@
   // Hint: highlight two tiles from an unsolved group.
   // ---------------------------------------------------------------------------
   function giveHint() {
-    if (tiles.length === 0) return;
+    if (busy || tiles.length === 0 || !hintsAllowed()) return;
     clearHint();
-    // Pick the group of a random remaining tile, highlight two of its tiles.
+    Sound.hint();
     const anyTile = tiles[Math.floor(Math.random() * tiles.length)];
     const groupTiles = tiles
       .filter((t) => t.groupIndex === anyTile.groupIndex)
@@ -331,14 +515,16 @@
   // End states
   // ---------------------------------------------------------------------------
   function win() {
-    const perfect = hearts === START_HEARTS;
+    const perfect = hearts === startHearts();
+    const groupsWord = numberWord(numGroups());
     overlayEmoji.textContent = perfect ? "🏆" : "🎉";
     overlayTitle.textContent = perfect ? "Perfect!" : "You did it!";
     overlayText.textContent = perfect
-      ? "You found all three groups with no mistakes!"
-      : "You found all three groups! Great job!";
+      ? "You found all " + groupsWord + " groups with no mistakes!"
+      : "You found all " + groupsWord + " groups! Great job!";
     overlayBtn.textContent = "Play Again ▶️";
     overlay.classList.remove("hidden");
+    Sound.win();
     launchConfetti();
   }
 
@@ -381,13 +567,74 @@
   // ---------------------------------------------------------------------------
   checkBtn.addEventListener("click", checkSelection);
   shuffleBtn.addEventListener("click", () => {
+    if (busy) return;
+    Sound.unlock();
     clearHint();
     tiles = shuffle(tiles);
     renderGrid();
   });
   hintBtn.addEventListener("click", giveHint);
-  newgameBtn.addEventListener("click", newGame);
-  overlayBtn.addEventListener("click", newGame);
+  newgameBtn.addEventListener("click", () => {
+    Sound.unlock();
+    newGame();
+  });
+  overlayBtn.addEventListener("click", () => {
+    Sound.unlock();
+    newGame();
+  });
+
+  soundToggle.addEventListener("click", () => {
+    Sound.unlock();
+    Sound.toggle();
+    syncSettingsUI();
+  });
+
+  gridBtns.forEach((b) =>
+    b.addEventListener("click", () => {
+      if (busy) return;
+      Sound.unlock();
+      const g = parseInt(b.dataset.grid, 10);
+      if (g === gridSize) return;
+      gridSize = g;
+      saveSetting(STORE.grid, String(gridSize));
+      newGame();
+    })
+  );
+
+  diffBtns.forEach((b) =>
+    b.addEventListener("click", () => {
+      if (busy) return;
+      Sound.unlock();
+      const d = b.dataset.diff;
+      if (d === difficulty || !DIFFICULTY[d]) return;
+      difficulty = d;
+      saveSetting(STORE.diff, difficulty);
+      newGame();
+    })
+  );
+
+  // Optional debug hook, active only when the page is opened with ?debug.
+  // Used by automated tests; never exposes answers during normal play.
+  if (/(?:^|[?&])debug(?:=|&|$)/.test(location.search)) {
+    window.__KC = {
+      groups: function () {
+        return puzzleGroups;
+      },
+      tiles: function () {
+        return tiles;
+      },
+      state: function () {
+        return {
+          gridSize: gridSize,
+          difficulty: difficulty,
+          hearts: hearts,
+          maxHearts: startHearts(),
+          muted: Sound.isMuted(),
+          hintsAllowed: hintsAllowed(),
+        };
+      },
+    };
+  }
 
   // ---- Go! ----
   newGame();

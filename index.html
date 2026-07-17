@@ -13,8 +13,22 @@
   <div class="app">
     <header class="topbar">
       <h1 class="title">🧩 Kid Connections</h1>
-      <p class="tagline">Find the <strong>3 groups</strong> that go together!</p>
+      <p class="tagline">Find the groups that go together!</p>
     </header>
+
+    <!-- Settings: grid size, difficulty, sound -->
+    <div class="settings">
+      <div class="seg" role="group" aria-label="Grid size">
+        <button class="seg-btn" type="button" data-grid="3">3×3</button>
+        <button class="seg-btn" type="button" data-grid="4">4×4</button>
+      </div>
+      <div class="seg" role="group" aria-label="Difficulty">
+        <button class="seg-btn" type="button" data-diff="easy">Easy</button>
+        <button class="seg-btn" type="button" data-diff="medium">Med</button>
+        <button class="seg-btn" type="button" data-diff="hard">Hard</button>
+      </div>
+      <button id="sound-toggle" class="icon-btn" type="button" aria-label="Toggle sound">🔊</button>
+    </div>
 
     <!-- Solved groups stack up here -->
     <section id="solved" class="solved" aria-live="polite"></section>
