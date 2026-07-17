@@ -86,6 +86,10 @@ html, body {
   grid-template-columns: repeat(3, 1fr);
   gap: var(--gap);
   margin-bottom: 12px;
+  /* Keep tiles pinned to the top so an animated height change never
+     stretches them, and don't overflow during the reflow glide. */
+  align-content: start;
+  overflow: hidden;
 }
 .tile {
   aspect-ratio: 1 / 1;
