@@ -174,27 +174,94 @@
     }
   }
 
+  const prefersReducedMotion =
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   function handleCorrect(groupIndex) {
-    // Flash the correct tiles, then move the group to the solved area.
+    // Celebrate the correct tiles, then glide the rest into place.
     animateTiles(selected, "correct");
     const group = puzzleGroups[groupIndex];
+    const solvedTexts = selected.slice();
+    selected = [];
+    checkBtn.disabled = true;
 
+    setTimeout(function () {
+      transitionRemoveGroup(groupIndex, group, solvedTexts);
+    }, 400);
+  }
+
+  // Smoothly remove a solved group: the solved tiles leave, and the remaining
+  // tiles + the grid's height animate to their new layout (FLIP technique) so
+  // rows never snap abruptly.
+  function transitionRemoveGroup(groupIndex, group) {
+    const oldBtns = Array.from(gridEl.querySelectorAll(".tile"));
+
+    // FIRST: record where the remaining tiles are right now, and the grid size.
+    const firstRects = {};
+    oldBtns.forEach(function (b) {
+      firstRects[b.textContent] = b.getBoundingClientRect();
+    });
+    const gridFirstHeight = gridEl.getBoundingClientRect().height;
+
+    // Move the group to the solved area and drop its tiles from the grid.
     solvedCount += 1;
     renderSolvedGroup(group, solvedCount);
+    tiles = tiles.filter(function (t) {
+      return t.groupIndex !== groupIndex;
+    });
+    renderGrid();
 
-    // Remove those tiles from the grid.
-    tiles = tiles.filter((t) => t.groupIndex !== groupIndex);
-    selected = [];
-
-    setTimeout(() => {
-      renderGrid();
+    function finish() {
       updateCheckBtn();
       if (solvedCount === NUM_GROUPS) {
         win();
       } else {
         setMessage("Yay! You found one! 🎈", "good");
       }
-    }, 350);
+    }
+
+    if (prefersReducedMotion) {
+      finish();
+      return;
+    }
+
+    // LAST: measure the new layout.
+    const newBtns = Array.from(gridEl.querySelectorAll(".tile"));
+    const gridLastHeight = gridEl.getBoundingClientRect().height;
+
+    // INVERT: pin the grid to its old height and offset each remaining tile
+    // back to where it just was, with no transition yet.
+    gridEl.style.height = gridFirstHeight + "px";
+    newBtns.forEach(function (b) {
+      const first = firstRects[b.textContent];
+      if (!first) return;
+      const last = b.getBoundingClientRect();
+      const dx = first.left - last.left;
+      const dy = first.top - last.top;
+      b.style.transition = "none";
+      b.style.transform = "translate(" + dx + "px, " + dy + "px)";
+    });
+
+    // PLAY: on the next frame, release everything to its final position.
+    requestAnimationFrame(function () {
+      gridEl.style.transition = "height 0.4s ease";
+      gridEl.style.height = gridLastHeight + "px";
+      newBtns.forEach(function (b) {
+        b.style.transition = "transform 0.4s ease";
+        b.style.transform = "";
+      });
+    });
+
+    // Clean up inline styles once the glide is done.
+    setTimeout(function () {
+      gridEl.style.transition = "";
+      gridEl.style.height = "";
+      newBtns.forEach(function (b) {
+        b.style.transition = "";
+        b.style.transform = "";
+      });
+      finish();
+    }, 430);
   }
 
   function handleWrong() {
