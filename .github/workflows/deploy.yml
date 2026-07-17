@@ -24,6 +24,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Stamp cache-busting version into asset URLs
+        # Replace the __CACHE_BUST__ placeholder in index.html with this commit's
+        # short SHA, so browsers always fetch fresh CSS/JS after a deploy.
+        run: sed -i "s/__CACHE_BUST__/${GITHUB_SHA::8}/g" index.html
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
